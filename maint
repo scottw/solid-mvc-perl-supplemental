@@ -1,0 +1,57 @@
+#!/usr/bin/env perl
+use Mojolicious::Lite;
+use lib 'lib';
+
+my $config = plugin Config => { file => 'maint.conf' };
+
+eval "require $config->{model}";
+die $@ if $@;
+
+## this class could also be included dynamically from the config
+use Errr;
+
+## Mark Horstmeier points out that this would likely be a "factory" in
+## a stronger OO language
+my $model = $config->{model}->new(
+    error  => Errr->new,
+    config => $config
+);
+
+$model->init;
+
+helper model => sub { $model };  ## the controller's handle to the model
+
+get '/tickets/:ticket_id' => sub {
+    my $c = shift;
+
+    my $ticket = $c->model->find_ticket($c->param('ticket_id'))
+      or do {
+          my $err = $c->model->error->{error};
+          my $code = $c->model->error->{http_code} // 404;
+
+          $c->render(json => { error => $err }, status => $code);
+          return;
+      };
+
+    $c->render(json => $ticket, status => 200);
+};
+
+post '/tickets' => sub {
+    my $c   = shift;
+    my $req = $c->req->json;    ## FIXME: validate inputs
+
+    my $ticket_id = $c->model->create_ticket($req)
+      or do {
+          my $err = $c->model->error->{error};
+          my $code = $c->model->error->{http_code} // 500;
+
+          $c->render(json => { error => $err }, status => $code);
+          return;
+      };
+
+    $c->render(
+        json   => { message => "Request received", ticket => $ticket_id, url => $c->url_for("/tickets/$ticket_id")->to_abs },
+        status => 201);
+};
+
+app->start;
