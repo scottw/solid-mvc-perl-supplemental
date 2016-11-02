@@ -10,8 +10,8 @@ die $@ if $@;
 ## this class could also be included dynamically from the config
 use Errr;
 
-## Mark Horstmeier points out that this would likely be a "factory" in
-## a stronger OO language
+## Mark points out that this would likely be a "factory" in a stronger
+## OO language
 my $model = $config->{model}->new(
     error  => Errr->new,
     config => $config

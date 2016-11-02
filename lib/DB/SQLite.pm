@@ -1,17 +1,18 @@
 package DB::SQLite;
 use Mojo::Base -base;
-use DBI;
+use DB::ORM;
 
 has error  => undef;
 has config => undef;
-has dbh    => undef;
+has orm    => sub { DB::ORM->new };
 
 sub init {
     my $m = shift;
 
-    $m->dbh(DBI->connect("dbi:SQLite:dbname=" . $m->config->{db_name}, "", "", { RaiseError => 1, AutoCommit => 0 }));
+    $m->orm->connect("dbi:SQLite:dbname=tickets.db","","",
+                     { RaiseError => 1, AutoCommit => 0 });
 
-    $m->dbh->do(<<_SQL_);
+    $m->orm->do(<<_SQL_);
 CREATE TABLE IF NOT EXISTS tickets (
   ticket INTEGER PRIMARY KEY,
   building TEXT,
@@ -37,41 +38,35 @@ sub create_ticket {
         return;
     }
 
-    my @fields = qw/building item id description expectation/;
-    my $fields = join ',' => @fields;
-    my $places = join ',' => ('?') x @fields;
+    my $error = {};
+    my $ticket_id = $m->orm->insert({error  => $error,
+                                     table  => 'tickets',
+                                     key    => 'ticket',
+                                     fields => [qw/building item id description expectation/],
+                                     values => [@{$ticket}{qw/building item id description expectation/}]});
 
-    my $sth = $m->dbh->prepare(qq!INSERT INTO tickets ($fields) VALUES ($places)!);
-    eval {
-        $sth->execute(@{$ticket}{@fields});
-        $m->dbh->commit;
-    };
-
-    if ($@) {
-        $m->dbh->rollback;
-        $m->error({ error => "Error creating ticket: $@", http_code => 500 });
+    if (keys %$error) {
+        $error->{http_code} = 500;
+        $m->error($error);
         return;
     }
 
-    if ($m->dbh->errstr) {
-        $m->error({ error => "Unable to create ticket", http_code => 400 });
-        return;
-    }
-
-    return $m->dbh->last_insert_id(undef, undef, "tickets", "ticket");
+    return $ticket_id;
 }
 
 sub find_ticket {
     my $m  = shift;
     my $id = shift;
 
-    my $sth = $m->dbh->prepare(qq!SELECT * FROM tickets WHERE ticket = ?!);
-    $sth->execute($id);
-    my $ticket = $sth->fetchrow_hashref;
-    $sth->finish;
+    my $error = {};
+    my $ticket = $m->orm->select_row({error => $error,
+                                      table => 'tickets',
+                                      where => [qw/ticket/],
+                                      value => [$id]});
 
-    unless ($ticket->{ticket}) {
-        $m->error({ error => "Ticket not found", http_code => 404 });
+    if (keys %$error) {
+        $error->{http_code} = 404;
+        $m->error($error);
         return;
     }
 
